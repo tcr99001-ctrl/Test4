@@ -9,11 +9,11 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { 
   Play, Users, Crown, Copy, CheckCircle2, Link as LinkIcon, 
   Palette, Eraser, Trash2, RefreshCw, AlertCircle, Timer,
-  Send, MessageCircle, PenTool, Trophy, Star, Zap, Lightbulb, Clock, Volume2, VolumeX
+  Send, PenTool, Star, Zap, Lightbulb, Clock, Volume2, VolumeX
 } from 'lucide-react';
 
 // ==================================================================
-// [완료] 사용자님의 Firebase 설정값을 적용했습니다.
+// [필수] 사용자님의 Firebase 설정값
 // ==================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyBPd5xk9UseJf79GTZogckQmKKwwogneco",
@@ -24,14 +24,16 @@ const firebaseConfig = {
   appId: "1:402376205992:web:be662592fa4d5f0efb849d"
 };
 
-// --- [SOUND ASSETS] 사운드 파일 (필요시 URL 교체 가능) ---
+// --- [SOUND ASSETS] 테스트용 무료 음원 URL ---
+// 소리가 안 난다면 이 URL들이 브라우저 보안 정책에 막혔을 수 있습니다.
+// 그럴 경우 직접 mp3 파일을 public 폴더에 넣고 경로를 '/bgm.mp3' 처럼 바꾸셔야 합니다.
 const SOUNDS = {
-  bgm_lobby: "https://cdn.pixabay.com/download/audio/2022/01/26/audio_d0c6ff1bcd.mp3", // 경쾌한 로비 음악
-  bgm_game: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_5b82098966.mp3",  // 긴장감 있는 게임 음악
-  sfx_correct: "https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3", // 정답 (띠링!)
-  sfx_pop: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_7368582d9d.mp3", // 버튼 클릭
-  sfx_start: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c3c3337a2b.mp3", // 게임 시작 휘슬
-  sfx_timer: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3", // 초읽기 (째깍)
+  bgm_lobby: "https://cdn.pixabay.com/download/audio/2022/01/26/audio_d0c6ff1bcd.mp3",
+  bgm_game: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_5b82098966.mp3", 
+  sfx_correct: "https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3",
+  sfx_pop: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_7368582d9d.mp3",
+  sfx_start: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c3c3337a2b.mp3",
+  sfx_timer: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3", 
 };
 
 // --- Firebase Init ---
@@ -49,7 +51,6 @@ try {
   db = getFirestore(firebaseApp);
   auth = getAuth(firebaseApp);
 } catch (e) { 
-  console.error("Firebase Init Error:", e);
   initError = e.message;
 }
 
@@ -70,7 +71,6 @@ const PALETTE = [
 const TURN_DURATION = 60; 
 const TOTAL_ROUNDS = 3;
 
-// 초성 추출
 const getChosung = (str) => {
   const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
   let result = "";
@@ -84,7 +84,7 @@ const getChosung = (str) => {
 
 const vibrate = () => { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30); };
 
-export default function CatchMindSoundVer() {
+export default function CatchMindFixedAudio() {
   const [user, setUser] = useState(null);
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
@@ -95,15 +95,14 @@ export default function CatchMindSoundVer() {
   const [timeLeft, setTimeLeft] = useState(0);
   
   // Audio State
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true); // 기본적으로 음소거 시작 (브라우저 정책 대응)
+  const [audioBlocked, setAudioBlocked] = useState(false); // 오디오 차단 감지
   const audioRefs = useRef({}); 
 
-  // UI State
   const [chatMsg, setChatMsg] = useState('');
   const chatBoxRef = useRef(null);
   const [toastMsg, setToastMsg] = useState(null);
   
-  // Canvas State
   const canvasRef = useRef(null);
   const [color, setColor] = useState('#000000');
   const [lineWidth, setLineWidth] = useState(5);
@@ -117,14 +116,13 @@ export default function CatchMindSoundVer() {
 
   // --- Audio Logic ---
   useEffect(() => {
-    // 오디오 객체 미리 로드
     Object.keys(SOUNDS).forEach(key => {
       const audio = new Audio(SOUNDS[key]);
       if(key.includes('bgm')) audio.loop = true;
+      audio.volume = 0.5; // 볼륨 50%
       audioRefs.current[key] = audio;
     });
     
-    // 컴포넌트 언마운트 시 오디오 정지
     return () => {
       Object.values(audioRefs.current).forEach(audio => audio.pause());
     };
@@ -134,11 +132,14 @@ export default function CatchMindSoundVer() {
     if (isMuted) return;
     const audio = audioRefs.current[key];
     if (audio) {
-      if (!key.includes('bgm')) {
-        audio.currentTime = 0;
-        audio.play().catch(e => console.log('Audio play failed', e));
-      } else {
-        audio.play().catch(e => console.log('BGM play failed', e));
+      if (!key.includes('bgm')) audio.currentTime = 0;
+      
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.warn("Audio play blocked:", error);
+          setAudioBlocked(true); // 차단됨 감지 -> UI에 표시
+        });
       }
     }
   };
@@ -151,7 +152,7 @@ export default function CatchMindSoundVer() {
     }
   };
 
-  // BGM 자동 전환
+  // BGM Controller
   useEffect(() => {
     if (!isJoined || isMuted) {
       stopSound('bgm_lobby');
@@ -168,28 +169,36 @@ export default function CatchMindSoundVer() {
     }
   }, [roomData?.status, isJoined, isMuted]);
 
+  // 음소거 해제 (유저 인터랙션 필수)
+  const enableSound = () => {
+    setIsMuted(false);
+    setAudioBlocked(false);
+    
+    // 오디오 컨텍스트 깨우기 위한 더미 재생
+    const dummy = audioRefs.current['sfx_pop'];
+    if(dummy) {
+      dummy.play().catch(() => {});
+      dummy.pause();
+    }
+  };
+
   const toggleMute = () => {
     if (isMuted) {
-      setIsMuted(false);
+      enableSound();
     } else {
       setIsMuted(true);
       Object.values(audioRefs.current).forEach(audio => audio.pause());
     }
   };
 
-  // --- Auth & Setup ---
+  // --- Auth ---
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
       const code = p.get('room');
       if (code && code.length === 4) setRoomCode(code.toUpperCase());
     }
-    
-    if(!auth) {
-      if(!initError) setError("Firebase 인증 객체가 없습니다. 설정을 확인하세요.");
-      return;
-    }
-
+    if(!auth) return;
     const unsub = onAuthStateChanged(auth, u => {
       if(u) setUser(u);
       else signInAnonymously(auth).catch(e => setError("로그인 실패: "+e.message));
@@ -209,12 +218,13 @@ export default function CatchMindSoundVer() {
           const diff = Math.ceil((data.turnEndTime - Date.now()) / 1000);
           setTimeLeft(diff > 0 ? diff : 0);
         }
-        // 스킬 및 이벤트 효과음 트리거
         if (data.lastSkillEffect && data.lastSkillEffect.timestamp > Date.now() - 3000) {
            setToastMsg(data.lastSkillEffect);
-           if (data.lastSkillEffect.type === 'correct') playSound('sfx_correct');
-           if (data.lastSkillEffect.type === 'start') playSound('sfx_start');
-           if (['pass','time','hint'].includes(data.lastSkillEffect.type)) playSound('sfx_pop');
+           if (!isMuted) {
+             if (data.lastSkillEffect.type === 'correct') playSound('sfx_correct');
+             if (data.lastSkillEffect.type === 'start') playSound('sfx_start');
+             if (['pass','time','hint'].includes(data.lastSkillEffect.type)) playSound('sfx_pop');
+           }
            setTimeout(() => setToastMsg(null), 3000);
         }
       } else setRoomData(null);
@@ -344,6 +354,7 @@ export default function CatchMindSoundVer() {
   const usePass = async () => {
     if (!isDrawer || myData.items.pass <= 0) return;
     vibrate();
+    if(!isMuted) playSound('sfx_pop');
     const newWord = WORDS[Math.floor(Math.random() * WORDS.length)];
     await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), { 'items.pass': myData.items.pass - 1 });
     await updateDoc(doc(db, 'rooms', roomCode), {
@@ -355,6 +366,7 @@ export default function CatchMindSoundVer() {
   const useHint = async () => {
     if (!isDrawer || roomData.hintText) return;
     vibrate();
+    if(!isMuted) playSound('sfx_pop');
     const chosung = getChosung(roomData.keyword);
     await updateDoc(doc(db, 'rooms', roomCode), {
       hintText: chosung, isHintUsed: true,
@@ -365,6 +377,7 @@ export default function CatchMindSoundVer() {
   const useTime = async () => {
     if (!isDrawer || myData.items.timeAdd <= 0) return;
     vibrate();
+    if(!isMuted) playSound('sfx_pop');
     await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), { 'items.timeAdd': myData.items.timeAdd - 1 });
     await updateDoc(doc(db, 'rooms', roomCode), {
       turnEndTime: roomData.turnEndTime + 15000,
@@ -375,7 +388,7 @@ export default function CatchMindSoundVer() {
   // --- Game Actions ---
   const handleCreate = async () => {
     if(!playerName) return setError("이름 입력 필요");
-    vibrate(); playSound('sfx_pop');
+    vibrate(); enableSound(); // 생성 시 사운드 활성화 시도
     const code = Math.random().toString(36).substring(2,6).toUpperCase();
     await setDoc(doc(db,'rooms',code), {
       hostId: user.uid, status: 'lobby', 
@@ -390,7 +403,7 @@ export default function CatchMindSoundVer() {
 
   const handleJoin = async () => {
     if(!playerName || roomCode.length!==4) return setError("정보 확인 필요");
-    vibrate(); playSound('sfx_pop');
+    vibrate(); enableSound(); // 입장 시 사운드 활성화 시도
     const snap = await getDoc(doc(db,'rooms',roomCode));
     if(!snap.exists()) return setError("방 없음");
     await setDoc(doc(db,'rooms',roomCode,'players',user.uid), { name: playerName, score: 0, joinedAt: Date.now(), items: { pass: 2, timeAdd: 1 }, lastActive: Date.now() });
@@ -484,7 +497,8 @@ export default function CatchMindSoundVer() {
     document.body.removeChild(el);
     setCopyStatus('link');
     setTimeout(() => setCopyStatus(null), 2000);
-    vibrate(); playSound('sfx_pop');
+    vibrate(); 
+    if(!isMuted) playSound('sfx_pop');
   };
 
   const handleReset = async () => await updateDoc(doc(db,'rooms',roomCode), { status: 'lobby', strokes: [], keyword: '', messages: [] });
@@ -496,23 +510,19 @@ export default function CatchMindSoundVer() {
   return (
     <div className="min-h-screen bg-indigo-50 text-slate-800 font-sans relative overflow-x-hidden selection:bg-indigo-200">
       
-      {/* Sound Toggle */}
+      {/* Sound Toggle (Fixed) */}
       <button 
         onClick={toggleMute} 
-        className="fixed top-4 right-20 z-50 p-2 bg-white/80 rounded-full shadow-md border border-slate-200 backdrop-blur-sm"
-        title={isMuted ? "Sound On" : "Sound Off"}
+        className={`fixed top-4 right-4 z-50 p-2 rounded-full shadow-md border backdrop-blur-sm transition-all ${isMuted || audioBlocked ? 'bg-red-100 border-red-200 animate-pulse' : 'bg-white/80 border-slate-200'}`}
+        title="소리 켜기/끄기"
       >
-        {isMuted ? <VolumeX size={20} className="text-slate-400"/> : <Volume2 size={20} className="text-indigo-600"/>}
+        {(isMuted || audioBlocked) ? <VolumeX size={20} className="text-red-500"/> : <Volume2 size={20} className="text-indigo-600"/>}
       </button>
 
-      {/* Toast Notification */}
+      {/* Toast */}
       {toastMsg && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 pointer-events-none">
           <div className="bg-slate-800/95 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-white/20">
-            {toastMsg.type === 'pass' && <RefreshCw className="text-blue-400 animate-spin-slow"/>}
-            {toastMsg.type === 'hint' && <Lightbulb className="text-yellow-400 animate-pulse"/>}
-            {toastMsg.type === 'time' && <Clock className="text-green-400"/>}
-            {toastMsg.type === 'correct' && <Star className="text-yellow-400 fill-current animate-bounce"/>}
             <span className="font-bold text-lg">{toastMsg.text}</span>
           </div>
         </div>
@@ -524,7 +534,7 @@ export default function CatchMindSoundVer() {
           <div className="p-2 bg-indigo-500 rounded-xl text-white shadow-sm"><Palette size={24} fill="currentColor"/></div>
           <div><h1 className="text-xl font-black tracking-tight text-slate-800">CATCH MIND</h1></div>
         </div>
-        {isJoined && roomCode && <div className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-black">{roomCode}</div>}
+        {isJoined && roomCode && <div className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-black mr-8">{roomCode}</div>}
       </header>
 
       {/* 1. Entrance */}
@@ -571,7 +581,6 @@ export default function CatchMindSoundVer() {
       {isJoined && roomData?.status === 'playing' && (
         <div className="flex flex-col h-[calc(100vh-80px)] p-4 max-w-lg mx-auto">
           
-          {/* Status Bar */}
           <div className="mb-3 p-3 rounded-2xl border-2 border-slate-100 bg-white flex justify-between items-center shadow-sm">
             <div>
               <div className="flex items-center gap-2">
@@ -614,7 +623,6 @@ export default function CatchMindSoundVer() {
             </div>
           </div>
 
-          {/* Canvas */}
           <div className={`relative flex-1 bg-white rounded-3xl shadow-inner border-4 overflow-hidden touch-none ${isDrawer ? 'border-indigo-400' : 'border-slate-200'}`}>
             {!isDrawer && <div className="absolute inset-0 z-10 bg-transparent"></div>}
             <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={endDrawing} onMouseLeave={endDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={endDrawing} className="w-full h-full cursor-crosshair"/>
@@ -637,7 +645,6 @@ export default function CatchMindSoundVer() {
             )}
           </div>
 
-          {/* Skills */}
           {isDrawer && (
             <div className="flex justify-center gap-2 mt-2">
               <button onClick={usePass} disabled={myData?.items?.pass <= 0} className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-bold disabled:opacity-50"><RefreshCw size={14}/> 패스 ({myData?.items?.pass})</button>
@@ -646,7 +653,6 @@ export default function CatchMindSoundVer() {
             </div>
           )}
 
-          {/* Chat */}
           <div className="h-40 mt-2 flex flex-col">
             <div ref={chatBoxRef} className="flex-1 overflow-y-auto bg-white/60 border-2 border-white rounded-t-2xl p-3 space-y-2 custom-scrollbar backdrop-blur-sm shadow-sm">
               {roomData.messages?.map((msg, i) => (
@@ -671,27 +677,19 @@ export default function CatchMindSoundVer() {
             <h2 className="text-4xl font-black text-slate-800">최종 순위</h2>
             <p className="text-slate-400 font-bold">명예의 전당</p>
           </div>
-
           <div className="flex-1 overflow-y-auto space-y-4 pb-20 custom-scrollbar">
             <div className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-lg">
               {players.sort((a,b) => b.score - a.score).map((p, i) => (
                 <div key={p.id} className="flex justify-between items-center p-4 border-b border-slate-50 last:border-0">
                   <div className="flex items-center gap-4">
                     <span className={`font-black w-8 text-center text-2xl ${i===0?'text-yellow-500':i===1?'text-slate-400':i===2?'text-orange-400':'text-slate-200'}`}>{i+1}</span>
-                    <div>
-                      <p className="font-bold text-slate-700 text-lg">{p.name}</p>
-                      {i===0 && <span className="text-[10px] bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full font-bold">WINNER</span>}
-                    </div>
+                    <div><p className="font-bold text-slate-700 text-lg">{p.name}</p>{i===0 && <span className="text-[10px] bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full font-bold">WINNER</span>}</div>
                   </div>
-                  <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-lg">
-                    <Star size={14} className="text-yellow-500" fill="currentColor"/>
-                    <span className="font-black text-slate-800">{p.score}</span>
-                  </div>
+                  <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-lg"><Star size={14} className="text-yellow-500" fill="currentColor"/><span className="font-black text-slate-800">{p.score}</span></div>
                 </div>
               ))}
             </div>
           </div>
-
           {isHost && (
             <div className="fixed bottom-6 left-0 w-full px-6 flex justify-center">
               <button onClick={handleReset} className="w-full max-w-md bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-2xl flex items-center justify-center gap-2 active:scale-95 transition-all"><RefreshCw size={20} /> 대기실로 돌아가기</button>
@@ -699,7 +697,6 @@ export default function CatchMindSoundVer() {
           )}
         </div>
       )}
-
     </div>
   );
-                                                  }
+}
