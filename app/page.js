@@ -9,7 +9,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { 
   Play, Users, Crown, Copy, CheckCircle2, Link as LinkIcon, 
   Palette, Eraser, Trash2, RefreshCw, AlertCircle, Timer,
-  Send, MessageCircle, PenTool, Trophy, Star, Zap, lightbulb, Clock, RotateCcw
+  Send, PenTool, Star, Zap, Lightbulb, Clock, Volume2, VolumeX, Music
 } from 'lucide-react';
 
 // ==================================================================
@@ -22,6 +22,17 @@ const firebaseConfig = {
   storageBucket: "test-4305d.firebasestorage.app",
   messagingSenderId: "402376205992",
   appId: "1:402376205992:web:be662592fa4d5f0efb849d"
+};
+
+// --- [SOUND ASSETS] 사운드 파일 주소 모음 ---
+// (실제 배포 시에는 본인이 호스팅한 mp3 주소로 교체하는 것이 좋습니다)
+const SOUNDS = {
+  bgm_lobby: "https://cdn.pixabay.com/download/audio/2022/01/26/audio_d0c6ff1bcd.mp3", // 로비 음악 (경쾌)
+  bgm_game: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_5b82098966.mp3",  // 게임 음악 (긴장감)
+  sfx_correct: "https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3", // 정답 (띠링)
+  sfx_pop: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_7368582d9d.mp3", // 버튼 클릭
+  sfx_start: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c3c3337a2b.mp3", // 게임 시작
+  sfx_timer: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3", // 타이머 (째깍)
 };
 
 // --- Firebase Init ---
@@ -39,21 +50,16 @@ try {
   db = getFirestore(firebaseApp);
   auth = getAuth(firebaseApp);
 } catch (e) { 
-  console.error("Firebase Init Error:", e);
   initError = e.message;
 }
 
-// --- 게임 데이터 (단어 100개 이상 + 초성 데이터 필요 시 자동 변환) ---
+// --- Constants ---
 const WORDS = [
   "호랑이", "비행기", "아이스크림", "축구", "피아노", "소방차", "눈사람", "해바라기", "스마트폰", "치킨",
   "자전거", "우산", "기린", "수박", "선풍기", "안경", "시계", "로봇", "공룡", "햄버거",
   "모자", "장갑", "양말", "케이크", "토끼", "고양이", "강아지", "오리", "거북이", "나무",
   "집", "자동차", "바나나", "포도", "딸기", "사과", "토마토", "감자", "고구마", "옥수수",
-  "짜장면", "라면", "김밥", "떡볶이", "순대", "튀김", "어묵", "핫도그", "피자", "콜라",
-  "사이다", "우유", "커피", "주스", "물", "불", "흙", "바람", "구름", "비",
-  "눈", "해", "달", "별", "우주", "지구", "학교", "병원", "경찰서", "소방서",
-  "우체국", "은행", "마트", "백화점", "시장", "공원", "놀이터", "수영장", "도서관", "박물관",
-  "미술관", "영화관", "노래방", "PC방", "카페", "식당", "미용실", "이발소", "세탁소", "주유소"
+  "경찰서", "소방서", "학교", "병원", "우체국", "은행", "마트", "백화점", "놀이터", "수영장"
 ];
 
 const PALETTE = [
@@ -61,10 +67,10 @@ const PALETTE = [
   "#800080", "#FFC0CB", "#A52A2A", "#808080", "#00FFFF", "#00FF00"
 ];
 
-const TURN_DURATION = 60; // 60초
+const TURN_DURATION = 60; 
 const TOTAL_ROUNDS = 3;
 
-// 한글 초성 추출 함수
+// 초성 추출
 const getChosung = (str) => {
   const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
   let result = "";
@@ -78,7 +84,7 @@ const getChosung = (str) => {
 
 const vibrate = () => { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30); };
 
-export default function MasterpieceGame() {
+export default function CatchMindSoundVer() {
   const [user, setUser] = useState(null);
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
@@ -88,12 +94,16 @@ export default function MasterpieceGame() {
   const [copyStatus, setCopyStatus] = useState(null);
   const [timeLeft, setTimeLeft] = useState(0);
   
-  // UI 상태
+  // Audio State
+  const [isMuted, setIsMuted] = useState(false);
+  const audioRefs = useRef({}); // 오디오 객체 저장
+
+  // UI State
   const [chatMsg, setChatMsg] = useState('');
   const chatBoxRef = useRef(null);
-  const [toastMsg, setToastMsg] = useState(null); // 스킬 사용 알림
+  const [toastMsg, setToastMsg] = useState(null);
   
-  // 캔버스 상태
+  // Canvas State
   const canvasRef = useRef(null);
   const [color, setColor] = useState('#000000');
   const [lineWidth, setLineWidth] = useState(5);
@@ -104,6 +114,67 @@ export default function MasterpieceGame() {
   const isHost = roomData?.hostId === user?.uid;
   const isDrawer = roomData?.currentDrawer === user?.uid;
   const myData = players.find(p => p.id === user?.uid);
+
+  // --- Audio Logic ---
+  useEffect(() => {
+    // 오디오 객체 미리 로드
+    Object.keys(SOUNDS).forEach(key => {
+      const audio = new Audio(SOUNDS[key]);
+      if(key.includes('bgm')) audio.loop = true;
+      audioRefs.current[key] = audio;
+    });
+  }, []);
+
+  const playSound = (key) => {
+    if (isMuted) return;
+    const audio = audioRefs.current[key];
+    if (audio) {
+      if (!key.includes('bgm')) {
+        audio.currentTime = 0; // 효과음은 처음부터 재생
+        audio.play().catch(e => console.log('Audio play failed', e));
+      } else {
+        // BGM은 play() 호출 (이미 재생 중이면 무시됨)
+        audio.play().catch(e => console.log('BGM play failed', e));
+      }
+    }
+  };
+
+  const stopSound = (key) => {
+    const audio = audioRefs.current[key];
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  };
+
+  // BGM 자동 전환 로직
+  useEffect(() => {
+    if (!isJoined || isMuted) {
+      stopSound('bgm_lobby');
+      stopSound('bgm_game');
+      return;
+    }
+
+    if (roomData?.status === 'lobby' || roomData?.status === 'result') {
+      stopSound('bgm_game');
+      playSound('bgm_lobby');
+    } else if (roomData?.status === 'playing') {
+      stopSound('bgm_lobby');
+      playSound('bgm_game');
+    }
+  }, [roomData?.status, isJoined, isMuted]);
+
+  // 음소거 토글
+  const toggleMute = () => {
+    if (isMuted) {
+      // Unmute: 현재 상태에 맞는 BGM 재생
+      setIsMuted(false);
+    } else {
+      // Mute: 모든 소리 끄기
+      setIsMuted(true);
+      Object.values(audioRefs.current).forEach(audio => audio.pause());
+    }
+  };
 
   // --- Auth & Setup ---
   useEffect(() => {
@@ -132,9 +203,11 @@ export default function MasterpieceGame() {
           const diff = Math.ceil((data.turnEndTime - Date.now()) / 1000);
           setTimeLeft(diff > 0 ? diff : 0);
         }
-        // 스킬 알림 (Toast) 감지
         if (data.lastSkillEffect && data.lastSkillEffect.timestamp > Date.now() - 3000) {
            setToastMsg(data.lastSkillEffect);
+           // 효과음 트리거
+           if (data.lastSkillEffect.type === 'correct') playSound('sfx_correct');
+           if (data.lastSkillEffect.type === 'start') playSound('sfx_start');
            setTimeout(() => setToastMsg(null), 3000);
         }
       } else setRoomData(null);
@@ -147,18 +220,26 @@ export default function MasterpieceGame() {
     return () => { unsubRoom(); unsubPlayers(); };
   }, [user, roomCode]);
 
-  // --- Timer & Logic ---
+  // --- Timer Sound ---
   useEffect(() => {
     if (roomData?.status === 'playing' && timeLeft > 0) {
+      if (timeLeft <= 10 && !isMuted) playSound('sfx_timer');
       const timer = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(timer);
     }
     if (isHost && roomData?.status === 'playing' && timeLeft === 0 && !roomData.isRoundOver) {
       handleNextTurn("시간 초과!"); 
     }
-  }, [roomData?.status, timeLeft, isHost]);
+  }, [roomData?.status, timeLeft, isHost, isMuted]);
 
-  // --- Canvas Rendering ---
+  // --- Chat Auto Scroll ---
+  useEffect(() => {
+    if(chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    }
+  }, [roomData?.messages]);
+
+  // --- Canvas Logic (Existing) ---
   const drawStrokes = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !roomData?.strokes) return;
@@ -252,89 +333,70 @@ export default function MasterpieceGame() {
     }
   };
 
-  // --- [NEW] Skill Actions (아이템 사용) ---
-  
-  // 1. 패스권 (단어 교체)
+  // --- Skills ---
   const usePass = async () => {
     if (!isDrawer || myData.items.pass <= 0) return;
     vibrate();
+    playSound('sfx_pop');
     const newWord = WORDS[Math.floor(Math.random() * WORDS.length)];
-    
-    await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), {
-      'items.pass': myData.items.pass - 1
-    });
+    await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), { 'items.pass': myData.items.pass - 1 });
     await updateDoc(doc(db, 'rooms', roomCode), {
-      keyword: newWord,
-      hintText: null, // 힌트 초기화
-      strokes: [], // 캔버스 초기화
-      lastSkillEffect: { type: 'pass', text: '🔄 패스권 사용! (단어 교체)', timestamp: Date.now() }
+      keyword: newWord, hintText: null, strokes: [],
+      lastSkillEffect: { type: 'pass', text: '🔄 패스권 사용!', timestamp: Date.now() }
     });
   };
 
-  // 2. 초성 힌트 (점수 절반 페널티)
   const useHint = async () => {
-    if (!isDrawer || roomData.hintText) return; // 이미 썼으면 불가
+    if (!isDrawer || roomData.hintText) return;
     vibrate();
+    playSound('sfx_pop');
     const chosung = getChosung(roomData.keyword);
-    
-    // 점수 절반 깎임 로직은 정답 맞췄을 때 계산 (여기선 표시만)
     await updateDoc(doc(db, 'rooms', roomCode), {
-      hintText: chosung,
-      isHintUsed: true, // 페널티 플래그
-      lastSkillEffect: { type: 'hint', text: `💡 초성 힌트 공개! [${chosung}]`, timestamp: Date.now() }
+      hintText: chosung, isHintUsed: true,
+      lastSkillEffect: { type: 'hint', text: `💡 초성 힌트: ${chosung}`, timestamp: Date.now() }
     });
   };
 
-  // 3. 시간 연장 (+15초)
   const useTime = async () => {
     if (!isDrawer || myData.items.timeAdd <= 0) return;
     vibrate();
-    
-    await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), {
-      'items.timeAdd': myData.items.timeAdd - 1
-    });
+    playSound('sfx_pop');
+    await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), { 'items.timeAdd': myData.items.timeAdd - 1 });
     await updateDoc(doc(db, 'rooms', roomCode), {
       turnEndTime: roomData.turnEndTime + 15000,
-      lastSkillEffect: { type: 'time', text: '⏰ 시간 연장! (+15초)', timestamp: Date.now() }
+      lastSkillEffect: { type: 'time', text: '⏰ 시간 연장 (+15초)', timestamp: Date.now() }
     });
   };
 
-  // --- Game Core Logic ---
+  // --- Game Actions ---
   const handleCreate = async () => {
     if(!playerName) return setError("이름 입력 필요");
-    vibrate();
+    vibrate(); playSound('sfx_pop');
     const code = Math.random().toString(36).substring(2,6).toUpperCase();
     await setDoc(doc(db,'rooms',code), {
       hostId: user.uid, status: 'lobby', 
       keyword: '', currentDrawer: '', messages: [], strokes: [],
       currentTurnIndex: 0, isRoundOver: false, currentRound: 1,
-      hintText: null, isHintUsed: false, lastSkillEffect: null, // 스킬 관련
+      hintText: null, isHintUsed: false, lastSkillEffect: null,
       createdAt: Date.now()
     });
-    // 아이템 지급 (패스2, 시간1)
-    await setDoc(doc(db,'rooms',code,'players',user.uid), { 
-      name: playerName, score: 0, joinedAt: Date.now(), 
-      items: { pass: 2, timeAdd: 1 } 
-    });
+    await setDoc(doc(db,'rooms',code,'players',user.uid), { name: playerName, score: 0, joinedAt: Date.now(), items: { pass: 2, timeAdd: 1 }, lastActive: Date.now() });
     setRoomCode(code);
   };
 
   const handleJoin = async () => {
     if(!playerName || roomCode.length!==4) return setError("정보 확인 필요");
-    vibrate();
+    vibrate(); playSound('sfx_pop');
     const snap = await getDoc(doc(db,'rooms',roomCode));
     if(!snap.exists()) return setError("방 없음");
-    await setDoc(doc(db,'rooms',roomCode,'players',user.uid), { 
-      name: playerName, score: 0, joinedAt: Date.now(),
-      items: { pass: 2, timeAdd: 1 }
-    });
-    setRoomCode(code);
+    await setDoc(doc(db,'rooms',roomCode,'players',user.uid), { name: playerName, score: 0, joinedAt: Date.now(), items: { pass: 2, timeAdd: 1 }, lastActive: Date.now() });
   };
 
   const handleStartGame = async () => {
     if(players.length < 2) return setError("최소 2명 필요");
     vibrate();
     
+    // 효과음 트리거를 위해 lastSkillEffect 사용
     const resetScores = players.map(p => updateDoc(doc(db,'rooms',roomCode,'players',p.id), { score: 0, items: { pass: 2, timeAdd: 1 } }));
     await Promise.all(resetScores);
 
@@ -343,18 +405,10 @@ export default function MasterpieceGame() {
     const word = WORDS[Math.floor(Math.random() * WORDS.length)];
 
     await updateDoc(doc(db,'rooms',roomCode), {
-      status: 'playing',
-      turnOrder: shuffledPlayers,
-      currentTurnIndex: 0,
-      currentRound: 1,
-      currentDrawer: firstDrawer,
-      keyword: word,
-      strokes: [],
-      messages: [{type:'system', text:'게임이 시작되었습니다!'}],
-      turnEndTime: Date.now() + (TURN_DURATION * 1000),
-      isRoundOver: false,
-      hintText: null,
-      isHintUsed: false
+      status: 'playing', turnOrder: shuffledPlayers, currentTurnIndex: 0, currentRound: 1,
+      currentDrawer: firstDrawer, keyword: word, strokes: [], messages: [],
+      turnEndTime: Date.now() + (TURN_DURATION * 1000), isRoundOver: false, hintText: null, isHintUsed: false,
+      lastSkillEffect: { type: 'start', text: '게임 시작!', timestamp: Date.now() }
     });
   };
 
@@ -364,20 +418,15 @@ export default function MasterpieceGame() {
     const msg = chatMsg.trim();
     setChatMsg('');
 
-    const newMsg = {
-      uid: user.uid, name: playerName, text: msg, timestamp: Date.now(), type: 'user'
-    };
+    const newMsg = { uid: user.uid, name: playerName, text: msg, timestamp: Date.now(), type: 'user' };
 
     if (!isDrawer && !roomData.isRoundOver && msg === roomData.keyword) {
       newMsg.type = 'correct';
-      newMsg.text = `${playerName}님이 정답을 맞혔습니다! (${msg})`;
+      newMsg.text = `${playerName}님 정답! (${msg})`;
       
       const drawerPlayer = players.find(p => p.id === roomData.currentDrawer);
-      
-      // 점수 계산 (스피드 보너스 +1)
       const speedBonus = timeLeft >= 30 ? 1 : 0;
       const myScoreAdd = 2 + speedBonus;
-      // 화가 점수 (힌트 썼으면 절반)
       const drawerScoreAdd = roomData.isHintUsed ? 1 : 2;
 
       await Promise.all([
@@ -386,7 +435,7 @@ export default function MasterpieceGame() {
         updateDoc(doc(db, 'rooms', roomCode), { 
           messages: arrayUnion(newMsg),
           isRoundOver: true,
-          lastSkillEffect: speedBonus ? { type: 'speed', text: '⚡ 스피드 보너스! (+1점)', timestamp: Date.now() } : null
+          lastSkillEffect: { type: 'correct', text: `🎉 정답! (${msg})`, timestamp: Date.now() }
         })
       ]);
       setTimeout(() => handleNextTurn(`${playerName}님 정답!`), 3000);
@@ -397,7 +446,6 @@ export default function MasterpieceGame() {
 
   const handleNextTurn = async (reason) => {
     if(!isHost) return;
-
     let nextIndex = roomData.currentTurnIndex + 1;
     let nextRound = roomData.currentRound;
 
@@ -414,23 +462,11 @@ export default function MasterpieceGame() {
     const nextDrawer = roomData.turnOrder[nextIndex];
     const nextWord = WORDS[Math.floor(Math.random() * WORDS.length)];
     
-    const sysMsg = {
-      uid: 'system', name: '알림', 
-      text: `${reason} 다음 출제자: ${players.find(p=>p.id===nextDrawer)?.name} (R${nextRound})`, 
-      timestamp: Date.now(), type: 'system'
-    };
-
     await updateDoc(doc(db, 'rooms', roomCode), {
-      currentTurnIndex: nextIndex,
-      currentRound: nextRound,
-      currentDrawer: nextDrawer,
-      keyword: nextWord,
-      strokes: [],
-      messages: arrayUnion(sysMsg),
-      turnEndTime: Date.now() + (TURN_DURATION * 1000),
-      isRoundOver: false,
-      hintText: null,
-      isHintUsed: false
+      currentTurnIndex: nextIndex, currentRound: nextRound, currentDrawer: nextDrawer,
+      keyword: nextWord, strokes: [],
+      messages: arrayUnion({ uid:'system', name:'알림', text:`${reason}`, timestamp:Date.now(), type:'system' }),
+      turnEndTime: Date.now() + (TURN_DURATION * 1000), isRoundOver: false, hintText: null, isHintUsed: false
     });
   };
 
@@ -445,7 +481,7 @@ export default function MasterpieceGame() {
     document.body.removeChild(el);
     setCopyStatus('link');
     setTimeout(() => setCopyStatus(null), 2000);
-    vibrate();
+    vibrate(); playSound('sfx_pop');
   };
 
   const handleReset = async () => await updateDoc(doc(db,'rooms',roomCode), { status: 'lobby', strokes: [], keyword: '', messages: [] });
@@ -457,14 +493,23 @@ export default function MasterpieceGame() {
   return (
     <div className="min-h-screen bg-indigo-50 text-slate-800 font-sans relative overflow-x-hidden selection:bg-indigo-200">
       
-      {/* Toast Notification (Skill Effect) */}
+      {/* Sound Toggle (Fixed) */}
+      <button 
+        onClick={toggleMute} 
+        className="fixed top-4 right-20 z-50 p-2 bg-white/80 rounded-full shadow-md border border-slate-200 backdrop-blur-sm"
+        title={isMuted ? "Sound On" : "Sound Off"}
+      >
+        {isMuted ? <VolumeX size={20} className="text-slate-400"/> : <Volume2 size={20} className="text-indigo-600"/>}
+      </button>
+
+      {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300">
-          <div className="bg-slate-800/90 text-white px-6 py-3 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-2 border border-white/20">
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 pointer-events-none">
+          <div className="bg-slate-800/95 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-white/20">
             {toastMsg.type === 'pass' && <RefreshCw className="text-blue-400 animate-spin-slow"/>}
-            {toastMsg.type === 'hint' && <lightbulb className="text-yellow-400 animate-pulse"/>}
+            {toastMsg.type === 'hint' && <Lightbulb className="text-yellow-400 animate-pulse"/>}
             {toastMsg.type === 'time' && <Clock className="text-green-400"/>}
-            {toastMsg.type === 'speed' && <Zap className="text-yellow-400 fill-current animate-bounce"/>}
+            {toastMsg.type === 'correct' && <Star className="text-yellow-400 fill-current animate-bounce"/>}
             <span className="font-bold text-lg">{toastMsg.text}</span>
           </div>
         </div>
@@ -533,7 +578,6 @@ export default function MasterpieceGame() {
               </div>
             </div>
             
-            {/* 정답/힌트 표시 영역 */}
             <div className="text-center">
               {isDrawer ? (
                 <div className="flex flex-col items-center">
@@ -548,7 +592,6 @@ export default function MasterpieceGame() {
                       <p className="text-lg font-black text-yellow-700">{roomData.hintText}</p>
                     </div>
                   ) : (
-                    // 빈칸 힌트 (글자수)
                     <div className="flex gap-1">
                       {roomData.keyword.split('').map((_,i) => (
                         <div key={i} className="w-6 h-8 bg-slate-100 rounded border border-slate-200 flex items-center justify-center">
@@ -573,7 +616,6 @@ export default function MasterpieceGame() {
             {!isDrawer && <div className="absolute inset-0 z-10 bg-transparent"></div>}
             <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={endDrawing} onMouseLeave={endDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={endDrawing} className="w-full h-full cursor-crosshair"/>
             
-            {/* 팔레트 & 도구 */}
             {isDrawer && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/95 p-3 rounded-3xl shadow-2xl flex flex-col gap-2 border border-slate-200 items-center w-[90%] max-w-sm backdrop-blur-md">
                 <div className="flex gap-2 overflow-x-auto w-full pb-2 scrollbar-hide px-1">
@@ -592,34 +634,16 @@ export default function MasterpieceGame() {
             )}
           </div>
 
-          {/* Skill Buttons (화가 전용) */}
+          {/* Skills */}
           {isDrawer && (
             <div className="flex justify-center gap-2 mt-2">
-              <button 
-                onClick={usePass} 
-                disabled={myData?.items?.pass <= 0}
-                className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-bold disabled:opacity-50"
-              >
-                <RefreshCw size={14}/> 패스 ({myData?.items?.pass})
-              </button>
-              <button 
-                onClick={useHint} 
-                disabled={roomData.isHintUsed}
-                className="flex items-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-xl text-xs font-bold disabled:opacity-50"
-              >
-                <AlertCircle size={14}/> 초성힌트 (점수반감)
-              </button>
-              <button 
-                onClick={useTime} 
-                disabled={myData?.items?.timeAdd <= 0}
-                className="flex items-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-xl text-xs font-bold disabled:opacity-50"
-              >
-                <Timer size={14}/> +15초 ({myData?.items?.timeAdd})
-              </button>
+              <button onClick={usePass} disabled={myData?.items?.pass <= 0} className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-bold disabled:opacity-50"><RefreshCw size={14}/> 패스 ({myData?.items?.pass})</button>
+              <button onClick={useHint} disabled={roomData.isHintUsed} className="flex items-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-xl text-xs font-bold disabled:opacity-50"><Lightbulb size={14}/> 초성힌트</button>
+              <button onClick={useTime} disabled={myData?.items?.timeAdd <= 0} className="flex items-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-xl text-xs font-bold disabled:opacity-50"><Clock size={14}/> +15초 ({myData?.items?.timeAdd})</button>
             </div>
           )}
 
-          {/* Chat Area */}
+          {/* Chat */}
           <div className="h-40 mt-2 flex flex-col">
             <div ref={chatBoxRef} className="flex-1 overflow-y-auto bg-white/60 border-2 border-white rounded-t-2xl p-3 space-y-2 custom-scrollbar backdrop-blur-sm shadow-sm">
               {roomData.messages?.map((msg, i) => (
@@ -629,18 +653,9 @@ export default function MasterpieceGame() {
                 </div>
               ))}
             </div>
-            
             <form onSubmit={sendMessage} className="flex gap-2 p-2 bg-white rounded-b-2xl border-t border-slate-100 shadow-sm">
-              <input 
-                value={chatMsg} 
-                onChange={e=>setChatMsg(e.target.value)} 
-                disabled={isDrawer || roomData.isRoundOver}
-                placeholder={isDrawer ? "정답을 그리는 중입니다..." : "정답을 입력하세요!"}
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
-              />
-              <button disabled={isDrawer || roomData.isRoundOver} type="submit" className="bg-indigo-500 text-white p-2.5 rounded-xl disabled:bg-slate-300 transition-all active:scale-95">
-                <Send size={18}/>
-              </button>
+              <input value={chatMsg} onChange={e=>setChatMsg(e.target.value)} disabled={isDrawer || roomData.isRoundOver} placeholder={isDrawer ? "그림을 그려주세요!" : "정답을 맞춰보세요!"} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"/>
+              <button disabled={isDrawer || roomData.isRoundOver} type="submit" className="bg-indigo-500 text-white p-2.5 rounded-xl disabled:bg-slate-300 transition-all active:scale-95"><Send size={18}/></button>
             </form>
           </div>
         </div>
@@ -653,27 +668,19 @@ export default function MasterpieceGame() {
             <h2 className="text-4xl font-black text-slate-800">최종 순위</h2>
             <p className="text-slate-400 font-bold">명예의 전당</p>
           </div>
-
           <div className="flex-1 overflow-y-auto space-y-4 pb-20 custom-scrollbar">
             <div className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-lg">
               {players.sort((a,b) => b.score - a.score).map((p, i) => (
                 <div key={p.id} className="flex justify-between items-center p-4 border-b border-slate-50 last:border-0">
                   <div className="flex items-center gap-4">
                     <span className={`font-black w-8 text-center text-2xl ${i===0?'text-yellow-500':i===1?'text-slate-400':i===2?'text-orange-400':'text-slate-200'}`}>{i+1}</span>
-                    <div>
-                      <p className="font-bold text-slate-700 text-lg">{p.name}</p>
-                      {i===0 && <span className="text-[10px] bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full font-bold">WINNER</span>}
-                    </div>
+                    <div><p className="font-bold text-slate-700 text-lg">{p.name}</p>{i===0 && <span className="text-[10px] bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full font-bold">WINNER</span>}</div>
                   </div>
-                  <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-lg">
-                    <Star size={14} className="text-yellow-500" fill="currentColor"/>
-                    <span className="font-black text-slate-800">{p.score}</span>
-                  </div>
+                  <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-lg"><Star size={14} className="text-yellow-500" fill="currentColor"/><span className="font-black text-slate-800">{p.score}</span></div>
                 </div>
               ))}
             </div>
           </div>
-
           {isHost && (
             <div className="fixed bottom-6 left-0 w-full px-6 flex justify-center">
               <button onClick={handleReset} className="w-full max-w-md bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-2xl flex items-center justify-center gap-2 active:scale-95 transition-all"><RefreshCw size={20} /> 대기실로 돌아가기</button>
@@ -681,7 +688,6 @@ export default function MasterpieceGame() {
           )}
         </div>
       )}
-
     </div>
   );
-                          }
+      }
