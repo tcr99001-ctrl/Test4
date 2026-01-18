@@ -7,9 +7,10 @@ import {
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { 
-  Play, Users, Crown, Copy, CheckCircle2, Link as LinkIcon, 
+  Play, Users, Crown, CheckCircle2, Link as LinkIcon, 
   Palette, Eraser, Trash2, RefreshCw, AlertCircle, Timer,
-  Send, PenTool, Star, Zap, Lightbulb, Clock, Volume2, VolumeX
+  Send, PenTool, Star, Zap, Lightbulb, Clock, PaintBucket,
+  ThumbsUp, Laugh, Frown, PartyPopper
 } from 'lucide-react';
 
 // ==================================================================
@@ -22,18 +23,6 @@ const firebaseConfig = {
   storageBucket: "test-4305d.firebasestorage.app",
   messagingSenderId: "402376205992",
   appId: "1:402376205992:web:be662592fa4d5f0efb849d"
-};
-
-// --- [SOUND ASSETS] 테스트용 무료 음원 URL ---
-// 소리가 안 난다면 이 URL들이 브라우저 보안 정책에 막혔을 수 있습니다.
-// 그럴 경우 직접 mp3 파일을 public 폴더에 넣고 경로를 '/bgm.mp3' 처럼 바꾸셔야 합니다.
-const SOUNDS = {
-"bgm_lobby": "https://cdn.pixabay.com/download/audio/2023/02/24/audio_46e7ce5b1c.mp3",
-  "bgm_game": "https://cdn.pixabay.com/download/audio/2022/11/02/audio_9f8c0a4a2c.mp3",
-  "sfx_correct": "https://cdn.pixabay.com/download/audio/2022/08/30/audio_c3a74947b4.mp3",
-  "sfx_pop": "https://cdn.pixabay.com/download/audio/2022/08/30/audio_c3a74947b4.mp3",
-  "sfx_start": "https://cdn.pixabay.com/download/audio/2022/06/15/audio_2dea793cbf.mp3",
-  "sfx_timer": "https://cdn.pixabay.com/download/audio/2022/10/05/audio_a1eb8ec4a7.mp3"
 };
 
 // --- Firebase Init ---
@@ -51,6 +40,7 @@ try {
   db = getFirestore(firebaseApp);
   auth = getAuth(firebaseApp);
 } catch (e) { 
+  console.error("Firebase Init Error:", e);
   initError = e.message;
 }
 
@@ -60,7 +50,9 @@ const WORDS = [
   "자전거", "우산", "기린", "수박", "선풍기", "안경", "시계", "로봇", "공룡", "햄버거",
   "모자", "장갑", "양말", "케이크", "토끼", "고양이", "강아지", "오리", "거북이", "나무",
   "집", "자동차", "바나나", "포도", "딸기", "사과", "토마토", "감자", "고구마", "옥수수",
-  "경찰서", "소방서", "학교", "병원", "우체국", "은행", "마트", "백화점", "놀이터", "수영장"
+  "경찰서", "소방서", "학교", "병원", "우체국", "은행", "마트", "백화점", "놀이터", "수영장",
+  "이순신", "세종대왕", "아이언맨", "스파이더맨", "엘사", "손흥민", "김연아", "유재석", "방탄소년단", "피카츄",
+  "자유의여신상", "에펠탑", "피라미드", "만리장성", "돌하르방", "남산타워", "숭례문", "경복궁", "독도", "한라산"
 ];
 
 const PALETTE = [
@@ -71,6 +63,10 @@ const PALETTE = [
 const TURN_DURATION = 60; 
 const TOTAL_ROUNDS = 3;
 
+// 진동
+const vibrate = () => { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30); };
+
+// 초성
 const getChosung = (str) => {
   const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
   let result = "";
@@ -82,9 +78,7 @@ const getChosung = (str) => {
   return result;
 };
 
-const vibrate = () => { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30); };
-
-export default function CatchMindFixedAudio() {
+export default function CatchMindVisualVer() {
   const [user, setUser] = useState(null);
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
@@ -94,19 +88,20 @@ export default function CatchMindFixedAudio() {
   const [copyStatus, setCopyStatus] = useState(null);
   const [timeLeft, setTimeLeft] = useState(0);
   
-  // Audio State
-  const [isMuted, setIsMuted] = useState(true); // 기본적으로 음소거 시작 (브라우저 정책 대응)
-  const [audioBlocked, setAudioBlocked] = useState(false); // 오디오 차단 감지
-  const audioRefs = useRef({}); 
-
+  // UI State
   const [chatMsg, setChatMsg] = useState('');
   const chatBoxRef = useRef(null);
   const [toastMsg, setToastMsg] = useState(null);
-  
+  const [wordChoices, setWordChoices] = useState(null); // 단어 선택 모달용
+  const [showConfetti, setShowConfetti] = useState(false); // 폭죽 효과
+  const [reactions, setReactions] = useState([]); // 이모지 리액션
+
+  // Canvas State
   const canvasRef = useRef(null);
   const [color, setColor] = useState('#000000');
   const [lineWidth, setLineWidth] = useState(5);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [tool, setTool] = useState('pen'); // 'pen', 'eraser', 'fill'
   const currentPath = useRef([]);
 
   const isJoined = user && players.some(p => p.id === user.uid);
@@ -114,84 +109,7 @@ export default function CatchMindFixedAudio() {
   const isDrawer = roomData?.currentDrawer === user?.uid;
   const myData = players.find(p => p.id === user?.uid);
 
-  // --- Audio Logic ---
-  useEffect(() => {
-    Object.keys(SOUNDS).forEach(key => {
-      const audio = new Audio(SOUNDS[key]);
-      if(key.includes('bgm')) audio.loop = true;
-      audio.volume = 0.5; // 볼륨 50%
-      audioRefs.current[key] = audio;
-    });
-    
-    return () => {
-      Object.values(audioRefs.current).forEach(audio => audio.pause());
-    };
-  }, []);
-
-  const playSound = (key) => {
-    if (isMuted) return;
-    const audio = audioRefs.current[key];
-    if (audio) {
-      if (!key.includes('bgm')) audio.currentTime = 0;
-      
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(error => {
-          console.warn("Audio play blocked:", error);
-          setAudioBlocked(true); // 차단됨 감지 -> UI에 표시
-        });
-      }
-    }
-  };
-
-  const stopSound = (key) => {
-    const audio = audioRefs.current[key];
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
-  };
-
-  // BGM Controller
-  useEffect(() => {
-    if (!isJoined || isMuted) {
-      stopSound('bgm_lobby');
-      stopSound('bgm_game');
-      return;
-    }
-
-    if (roomData?.status === 'lobby' || roomData?.status === 'result') {
-      stopSound('bgm_game');
-      playSound('bgm_lobby');
-    } else if (roomData?.status === 'playing') {
-      stopSound('bgm_lobby');
-      playSound('bgm_game');
-    }
-  }, [roomData?.status, isJoined, isMuted]);
-
-  // 음소거 해제 (유저 인터랙션 필수)
-  const enableSound = () => {
-    setIsMuted(false);
-    setAudioBlocked(false);
-    
-    // 오디오 컨텍스트 깨우기 위한 더미 재생
-    const dummy = audioRefs.current['sfx_pop'];
-    if(dummy) {
-      dummy.play().catch(() => {});
-      dummy.pause();
-    }
-  };
-
-  const toggleMute = () => {
-    if (isMuted) {
-      enableSound();
-    } else {
-      setIsMuted(true);
-      Object.values(audioRefs.current).forEach(audio => audio.pause());
-    }
-  };
-
-  // --- Auth ---
+  // --- Auth & Setup ---
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
@@ -206,7 +124,7 @@ export default function CatchMindFixedAudio() {
     return () => unsub();
   }, []);
 
-  // --- Data Sync ---
+  // --- Data Sync & Effect Trigger ---
   useEffect(() => {
     if(!user || !roomCode || roomCode.length!==4 || !db) return;
     
@@ -218,14 +136,24 @@ export default function CatchMindFixedAudio() {
           const diff = Math.ceil((data.turnEndTime - Date.now()) / 1000);
           setTimeLeft(diff > 0 ? diff : 0);
         }
-        if (data.lastSkillEffect && data.lastSkillEffect.timestamp > Date.now() - 3000) {
-           setToastMsg(data.lastSkillEffect);
-           if (!isMuted) {
-             if (data.lastSkillEffect.type === 'correct') playSound('sfx_correct');
-             if (data.lastSkillEffect.type === 'start') playSound('sfx_start');
-             if (['pass','time','hint'].includes(data.lastSkillEffect.type)) playSound('sfx_pop');
+        
+        // 스킬 및 리액션 효과 처리
+        if (data.lastEffect && data.lastEffect.timestamp > Date.now() - 3000) {
+           if (data.lastEffect.type === 'reaction') {
+             // 리액션 추가
+             addReaction(data.lastEffect.emoji);
+           } else if (data.lastEffect.type === 'correct') {
+             // 정답 폭죽
+             setShowConfetti(true);
+             setTimeout(() => setShowConfetti(false), 3000);
+             setToastMsg(data.lastEffect);
+           } else {
+             // 일반 토스트
+             setToastMsg(data.lastEffect);
            }
-           setTimeout(() => setToastMsg(null), 3000);
+           if (data.lastEffect.type !== 'reaction') {
+             setTimeout(() => setToastMsg(null), 3000);
+           }
         }
       } else setRoomData(null);
     });
@@ -237,24 +165,17 @@ export default function CatchMindFixedAudio() {
     return () => { unsubRoom(); unsubPlayers(); };
   }, [user, roomCode]);
 
-  // --- Timer Sound ---
+  // --- Timer & Logic ---
   useEffect(() => {
     if (roomData?.status === 'playing' && timeLeft > 0) {
-      if (timeLeft <= 10 && !isMuted) playSound('sfx_timer');
       const timer = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(timer);
     }
+    // 시간 종료 시
     if (isHost && roomData?.status === 'playing' && timeLeft === 0 && !roomData.isRoundOver) {
       handleNextTurn("시간 초과!"); 
     }
-  }, [roomData?.status, timeLeft, isHost, isMuted]);
-
-  // --- Chat Auto Scroll ---
-  useEffect(() => {
-    if(chatBoxRef.current) {
-      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-    }
-  }, [roomData?.messages]);
+  }, [roomData?.status, timeLeft, isHost]);
 
   // --- Canvas Logic ---
   const drawStrokes = useCallback(() => {
@@ -267,6 +188,14 @@ export default function CatchMindFixedAudio() {
     ctx.lineJoin = 'round';
 
     roomData.strokes.forEach(stroke => {
+      if (stroke.type === 'fill') {
+        // [NEW] 채우기 렌더링 (간소화: 배경색 변경으로 처리하거나, 실제 픽셀 처리는 복잡하므로 여기선 배경색 덮기로 구현)
+        // 실제 캔버스 픽셀 처리는 실시간 동기화에 무거우므로, '전체 채우기'로 가정하거나 사각형 그리기
+        ctx.fillStyle = stroke.color;
+        ctx.fillRect(0, 0, width, height);
+        return;
+      }
+
       if (stroke.points.length < 1) return;
       ctx.beginPath();
       ctx.strokeStyle = stroke.color;
@@ -308,6 +237,11 @@ export default function CatchMindFixedAudio() {
 
   const startDrawing = (e) => {
     if (!isDrawer || roomData.isRoundOver) return;
+    if (tool === 'fill') {
+      // 채우기 도구일 때
+      handleFill();
+      return;
+    }
     setIsDrawing(true);
     currentPath.current = [getRelativePos(e)];
   };
@@ -319,9 +253,12 @@ export default function CatchMindFixedAudio() {
     currentPath.current.push(pos);
     const ctx = canvasRef.current.getContext('2d');
     const { width, height } = canvasRef.current;
-    ctx.lineWidth = lineWidth;
+    
+    ctx.lineWidth = tool === 'eraser' ? 20 : lineWidth;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = color;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = tool === 'eraser' ? '#FFFFFF' : color;
+    
     const prev = currentPath.current[currentPath.current.length - 2];
     if (prev) {
       ctx.beginPath();
@@ -337,11 +274,24 @@ export default function CatchMindFixedAudio() {
     if (currentPath.current.length > 0) {
       try {
         await updateDoc(doc(db, 'rooms', roomCode), {
-          strokes: arrayUnion({ color, lineWidth, points: currentPath.current })
+          strokes: arrayUnion({ 
+            color: tool === 'eraser' ? '#FFFFFF' : color, 
+            lineWidth: tool === 'eraser' ? 20 : lineWidth, 
+            points: currentPath.current,
+            type: 'line'
+          })
         });
       } catch (e) {}
     }
     currentPath.current = [];
+  };
+
+  const handleFill = async () => {
+    if (confirm("화면 전체를 채우시겠습니까?")) {
+      await updateDoc(doc(db, 'rooms', roomCode), {
+        strokes: arrayUnion({ color: color, type: 'fill', points: [] })
+      });
+    }
   };
 
   const clearCanvas = async () => {
@@ -354,47 +304,64 @@ export default function CatchMindFixedAudio() {
   const usePass = async () => {
     if (!isDrawer || myData.items.pass <= 0) return;
     vibrate();
-    if(!isMuted) playSound('sfx_pop');
+    // 패스 시 다시 단어 선택 화면으로 (로직 간소화: 랜덤 교체)
     const newWord = WORDS[Math.floor(Math.random() * WORDS.length)];
     await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), { 'items.pass': myData.items.pass - 1 });
     await updateDoc(doc(db, 'rooms', roomCode), {
       keyword: newWord, hintText: null, strokes: [],
-      lastSkillEffect: { type: 'pass', text: '🔄 패스권 사용!', timestamp: Date.now() }
+      lastEffect: { type: 'pass', text: '🔄 패스권 사용!', timestamp: Date.now() }
     });
   };
 
   const useHint = async () => {
     if (!isDrawer || roomData.hintText) return;
     vibrate();
-    if(!isMuted) playSound('sfx_pop');
     const chosung = getChosung(roomData.keyword);
     await updateDoc(doc(db, 'rooms', roomCode), {
       hintText: chosung, isHintUsed: true,
-      lastSkillEffect: { type: 'hint', text: `💡 초성 힌트: ${chosung}`, timestamp: Date.now() }
+      lastEffect: { type: 'hint', text: `💡 초성 힌트: ${chosung}`, timestamp: Date.now() }
     });
   };
 
   const useTime = async () => {
     if (!isDrawer || myData.items.timeAdd <= 0) return;
     vibrate();
-    if(!isMuted) playSound('sfx_pop');
     await updateDoc(doc(db, 'rooms', roomCode, 'players', user.uid), { 'items.timeAdd': myData.items.timeAdd - 1 });
     await updateDoc(doc(db, 'rooms', roomCode), {
       turnEndTime: roomData.turnEndTime + 15000,
-      lastSkillEffect: { type: 'time', text: '⏰ 시간 연장 (+15초)', timestamp: Date.now() }
+      lastEffect: { type: 'time', text: '⏰ 시간 연장 (+15초)', timestamp: Date.now() }
     });
+  };
+
+  // --- Reactions ---
+  const sendReaction = async (emoji) => {
+    vibrate();
+    // 로컬 애니메이션 추가 (즉시 반응)
+    addReaction(emoji);
+    // 서버 전송 (다른 사람도 보게)
+    await updateDoc(doc(db, 'rooms', roomCode), {
+      lastEffect: { type: 'reaction', emoji, timestamp: Date.now() } // 단순 트리거용
+    });
+  };
+
+  const addReaction = (emoji) => {
+    const id = Date.now() + Math.random();
+    setReactions(prev => [...prev, { id, emoji, x: Math.random() * 80 + 10 }]); // 랜덤 X 위치
+    setTimeout(() => {
+      setReactions(prev => prev.filter(r => r.id !== id));
+    }, 2000);
   };
 
   // --- Game Actions ---
   const handleCreate = async () => {
     if(!playerName) return setError("이름 입력 필요");
-    vibrate(); enableSound(); // 생성 시 사운드 활성화 시도
+    vibrate();
     const code = Math.random().toString(36).substring(2,6).toUpperCase();
     await setDoc(doc(db,'rooms',code), {
       hostId: user.uid, status: 'lobby', 
       keyword: '', currentDrawer: '', messages: [], strokes: [],
       currentTurnIndex: 0, isRoundOver: false, currentRound: 1,
-      hintText: null, isHintUsed: false, lastSkillEffect: null,
+      hintText: null, isHintUsed: false, lastEffect: null,
       createdAt: Date.now()
     });
     await setDoc(doc(db,'rooms',code,'players',user.uid), { name: playerName, score: 0, joinedAt: Date.now(), items: { pass: 2, timeAdd: 1 }, lastActive: Date.now() });
@@ -403,7 +370,7 @@ export default function CatchMindFixedAudio() {
 
   const handleJoin = async () => {
     if(!playerName || roomCode.length!==4) return setError("정보 확인 필요");
-    vibrate(); enableSound(); // 입장 시 사운드 활성화 시도
+    vibrate();
     const snap = await getDoc(doc(db,'rooms',roomCode));
     if(!snap.exists()) return setError("방 없음");
     await setDoc(doc(db,'rooms',roomCode,'players',user.uid), { name: playerName, score: 0, joinedAt: Date.now(), items: { pass: 2, timeAdd: 1 }, lastActive: Date.now() });
@@ -413,18 +380,31 @@ export default function CatchMindFixedAudio() {
     if(players.length < 2) return setError("최소 2명 필요");
     vibrate();
     
+    // 점수 초기화
     const resetScores = players.map(p => updateDoc(doc(db,'rooms',roomCode,'players',p.id), { score: 0, items: { pass: 2, timeAdd: 1 } }));
     await Promise.all(resetScores);
 
     const shuffledPlayers = players.map(p => p.id).sort(() => Math.random() - 0.5);
-    const firstDrawer = shuffledPlayers[0];
-    const word = WORDS[Math.floor(Math.random() * WORDS.length)];
-
+    
+    // 첫 턴 설정 (단어 선택 단계로 시작하고 싶다면 status를 'selecting'으로 두고 구현 가능. 여기선 랜덤)
+    // [NEW] 단어 선택 모달 띄우기 위해 상태 변경 없이 로컬 처리 후 업데이트
     await updateDoc(doc(db,'rooms',roomCode), {
-      status: 'playing', turnOrder: shuffledPlayers, currentTurnIndex: 0, currentRound: 1,
-      currentDrawer: firstDrawer, keyword: word, strokes: [], messages: [],
-      turnEndTime: Date.now() + (TURN_DURATION * 1000), isRoundOver: false, hintText: null, isHintUsed: false,
-      lastSkillEffect: { type: 'start', text: '게임 시작!', timestamp: Date.now() }
+      status: 'selecting_word', // 단어 선택 단계
+      turnOrder: shuffledPlayers, currentTurnIndex: 0, currentRound: 1,
+      currentDrawer: shuffledPlayers[0],
+      messages: [{type:'system', text:'게임이 시작되었습니다!'}],
+      isRoundOver: false
+    });
+  };
+
+  const selectWord = async (word) => {
+    vibrate();
+    await updateDoc(doc(db,'rooms',roomCode), {
+      status: 'playing',
+      keyword: word,
+      strokes: [],
+      turnEndTime: Date.now() + (TURN_DURATION * 1000),
+      lastEffect: { type: 'start', text: '🎨 그림 그리기 시작!', timestamp: Date.now() }
     });
   };
 
@@ -451,7 +431,7 @@ export default function CatchMindFixedAudio() {
         updateDoc(doc(db, 'rooms', roomCode), { 
           messages: arrayUnion(newMsg),
           isRoundOver: true,
-          lastSkillEffect: { type: 'correct', text: `🎉 정답! (${msg})`, timestamp: Date.now() }
+          lastEffect: { type: 'correct', text: `🎉 정답! (${msg})`, timestamp: Date.now() }
         })
       ]);
       setTimeout(() => handleNextTurn(`${playerName}님 정답!`), 3000);
@@ -476,13 +456,13 @@ export default function CatchMindFixedAudio() {
     }
 
     const nextDrawer = roomData.turnOrder[nextIndex];
-    const nextWord = WORDS[Math.floor(Math.random() * WORDS.length)];
     
+    // 다음 사람 단어 선택 단계로
     await updateDoc(doc(db, 'rooms', roomCode), {
+      status: 'selecting_word',
       currentTurnIndex: nextIndex, currentRound: nextRound, currentDrawer: nextDrawer,
-      keyword: nextWord, strokes: [],
       messages: arrayUnion({ uid:'system', name:'알림', text:`${reason}`, timestamp:Date.now(), type:'system' }),
-      turnEndTime: Date.now() + (TURN_DURATION * 1000), isRoundOver: false, hintText: null, isHintUsed: false
+      isRoundOver: false, hintText: null, isHintUsed: false
     });
   };
 
@@ -497,8 +477,7 @@ export default function CatchMindFixedAudio() {
     document.body.removeChild(el);
     setCopyStatus('link');
     setTimeout(() => setCopyStatus(null), 2000);
-    vibrate(); 
-    if(!isMuted) playSound('sfx_pop');
+    vibrate();
   };
 
   const handleReset = async () => await updateDoc(doc(db,'rooms',roomCode), { status: 'lobby', strokes: [], keyword: '', messages: [] });
@@ -510,21 +489,32 @@ export default function CatchMindFixedAudio() {
   return (
     <div className="min-h-screen bg-indigo-50 text-slate-800 font-sans relative overflow-x-hidden selection:bg-indigo-200">
       
-      {/* Sound Toggle (Fixed) */}
-      <button 
-        onClick={toggleMute} 
-        className={`fixed top-4 right-4 z-50 p-2 rounded-full shadow-md border backdrop-blur-sm transition-all ${isMuted || audioBlocked ? 'bg-red-100 border-red-200 animate-pulse' : 'bg-white/80 border-slate-200'}`}
-        title="소리 켜기/끄기"
-      >
-        {(isMuted || audioBlocked) ? <VolumeX size={20} className="text-red-500"/> : <Volume2 size={20} className="text-indigo-600"/>}
-      </button>
-
       {/* Toast */}
       {toastMsg && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 pointer-events-none">
           <div className="bg-slate-800/95 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-white/20">
+            {toastMsg.type === 'pass' && <RefreshCw className="text-blue-400 animate-spin-slow"/>}
+            {toastMsg.type === 'hint' && <Lightbulb className="text-yellow-400 animate-pulse"/>}
+            {toastMsg.type === 'time' && <Clock className="text-green-400"/>}
+            {toastMsg.type === 'correct' && <Star className="text-yellow-400 fill-current animate-bounce"/>}
             <span className="font-bold text-lg">{toastMsg.text}</span>
           </div>
+        </div>
+      )}
+
+      {/* Floating Reactions */}
+      <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+        {reactions.map(r => (
+          <div key={r.id} className="absolute bottom-20 text-4xl animate-float-up" style={{left: `${r.x}%`}}>
+            {r.emoji}
+          </div>
+        ))}
+      </div>
+
+      {/* Confetti Effect (CSS Animation) */}
+      {showConfetti && (
+        <div className="fixed inset-0 z-50 pointer-events-none flex justify-center items-center">
+          <div className="text-6xl animate-bounce">🎉🎊✨</div>
         </div>
       )}
 
@@ -534,7 +524,7 @@ export default function CatchMindFixedAudio() {
           <div className="p-2 bg-indigo-500 rounded-xl text-white shadow-sm"><Palette size={24} fill="currentColor"/></div>
           <div><h1 className="text-xl font-black tracking-tight text-slate-800">CATCH MIND</h1></div>
         </div>
-        {isJoined && roomCode && <div className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-black mr-8">{roomCode}</div>}
+        {isJoined && roomCode && <div className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-black">{roomCode}</div>}
       </header>
 
       {/* 1. Entrance */}
@@ -577,10 +567,47 @@ export default function CatchMindFixedAudio() {
         </div>
       )}
 
+      {/* 2.5 Word Selection (NEW) */}
+      {isJoined && roomData?.status === 'selecting_word' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white p-8 rounded-[2rem] shadow-2xl max-w-sm w-full text-center space-y-6 animate-in zoom-in">
+            {isDrawer ? (
+              <>
+                <h3 className="text-2xl font-black text-slate-800">제시어를 선택하세요</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {[WORDS[Math.floor(Math.random()*WORDS.length)], WORDS[Math.floor(Math.random()*WORDS.length)]].map((w, i) => (
+                    <button key={i} onClick={() => selectWord(w)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 py-6 rounded-2xl font-black text-lg transition-all border-2 border-indigo-200">
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="py-10">
+                <div className="w-16 h-16 border-4 border-slate-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="font-bold text-slate-500">화가가 단어를 고르고 있습니다...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 3. Playing Phase */}
       {isJoined && roomData?.status === 'playing' && (
-        <div className="flex flex-col h-[calc(100vh-80px)] p-4 max-w-lg mx-auto">
+        <div className="flex flex-col h-[calc(100vh-80px)] p-4 max-w-lg mx-auto relative">
           
+          {/* Reaction Buttons (Viewer Only) */}
+          {!isDrawer && (
+            <div className="absolute right-4 bottom-24 flex flex-col gap-2 z-30">
+              {['👍','😂','😲','👏'].map(emoji => (
+                <button key={emoji} onClick={() => sendReaction(emoji)} className="w-12 h-12 bg-white rounded-full shadow-lg text-2xl flex items-center justify-center border border-slate-100 hover:scale-110 transition-transform active:scale-95">
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Status Bar */}
           <div className="mb-3 p-3 rounded-2xl border-2 border-slate-100 bg-white flex justify-between items-center shadow-sm">
             <div>
               <div className="flex items-center gap-2">
@@ -623,6 +650,7 @@ export default function CatchMindFixedAudio() {
             </div>
           </div>
 
+          {/* Canvas */}
           <div className={`relative flex-1 bg-white rounded-3xl shadow-inner border-4 overflow-hidden touch-none ${isDrawer ? 'border-indigo-400' : 'border-slate-200'}`}>
             {!isDrawer && <div className="absolute inset-0 z-10 bg-transparent"></div>}
             <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={endDrawing} onMouseLeave={endDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={endDrawing} className="w-full h-full cursor-crosshair"/>
@@ -631,20 +659,22 @@ export default function CatchMindFixedAudio() {
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/95 p-3 rounded-3xl shadow-2xl flex flex-col gap-2 border border-slate-200 items-center w-[90%] max-w-sm backdrop-blur-md">
                 <div className="flex gap-2 overflow-x-auto w-full pb-2 scrollbar-hide px-1">
                   {PALETTE.map(c => (
-                    <button key={c} onClick={()=>setColor(c)} className={`shrink-0 p-1 rounded-full transition-all ${color===c ? 'ring-2 ring-offset-2 ring-indigo-500 scale-110' : ''}`}>
+                    <button key={c} onClick={()=>{setColor(c); setTool('pen');}} className={`shrink-0 p-1 rounded-full transition-all ${color===c && tool==='pen' ? 'ring-2 ring-offset-2 ring-indigo-500 scale-110' : ''}`}>
                       <div className="w-6 h-6 rounded-full border border-black/10" style={{backgroundColor:c}}></div>
                     </button>
                   ))}
                 </div>
                 <div className="flex gap-4 w-full justify-center border-t border-slate-100 pt-2">
-                  <button onClick={()=>setLineWidth(5)} className={`p-2 rounded-xl ${lineWidth===5 && color!=='#ffffff' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400'}`}><PenTool size={20}/></button>
-                  <button onClick={()=>setColor('#ffffff')} className={`p-2 rounded-xl ${color==='#ffffff' ? 'bg-slate-200 text-slate-700' : 'text-slate-400'}`}><Eraser size={20}/></button>
+                  <button onClick={()=>{setTool('pen'); setLineWidth(5);}} className={`p-2 rounded-xl ${tool==='pen' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400'}`}><PenTool size={20}/></button>
+                  <button onClick={()=>setTool('fill')} className={`p-2 rounded-xl ${tool==='fill' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400'}`}><PaintBucket size={20}/></button>
+                  <button onClick={()=>setTool('eraser')} className={`p-2 rounded-xl ${tool==='eraser' ? 'bg-slate-200 text-slate-700' : 'text-slate-400'}`}><Eraser size={20}/></button>
                   <button onClick={clearCanvas} className="p-2 rounded-xl text-red-400 hover:bg-red-50"><Trash2 size={20}/></button>
                 </div>
               </div>
             )}
           </div>
 
+          {/* Skills */}
           {isDrawer && (
             <div className="flex justify-center gap-2 mt-2">
               <button onClick={usePass} disabled={myData?.items?.pass <= 0} className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-bold disabled:opacity-50"><RefreshCw size={14}/> 패스 ({myData?.items?.pass})</button>
@@ -653,6 +683,7 @@ export default function CatchMindFixedAudio() {
             </div>
           )}
 
+          {/* Chat */}
           <div className="h-40 mt-2 flex flex-col">
             <div ref={chatBoxRef} className="flex-1 overflow-y-auto bg-white/60 border-2 border-white rounded-t-2xl p-3 space-y-2 custom-scrollbar backdrop-blur-sm shadow-sm">
               {roomData.messages?.map((msg, i) => (
@@ -699,4 +730,4 @@ export default function CatchMindFixedAudio() {
       )}
     </div>
   );
-}
+        }
