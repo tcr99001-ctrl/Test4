@@ -28,12 +28,12 @@ const firebaseConfig = {
 // 소리가 안 난다면 이 URL들이 브라우저 보안 정책에 막혔을 수 있습니다.
 // 그럴 경우 직접 mp3 파일을 public 폴더에 넣고 경로를 '/bgm.mp3' 처럼 바꾸셔야 합니다.
 const SOUNDS = {
-  bgm_lobby: "https://cdn.pixabay.com/download/audio/2022/01/26/audio_d0c6ff1bcd.mp3",
-  bgm_game: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_5b82098966.mp3", 
-  sfx_correct: "https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3",
-  sfx_pop: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_7368582d9d.mp3",
-  sfx_start: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c3c3337a2b.mp3",
-  sfx_timer: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3", 
+"bgm_lobby": "https://cdn.pixabay.com/download/audio/2023/02/24/audio_46e7ce5b1c.mp3",
+  "bgm_game": "https://cdn.pixabay.com/download/audio/2022/11/02/audio_9f8c0a4a2c.mp3",
+  "sfx_correct": "https://cdn.pixabay.com/download/audio/2022/08/30/audio_c3a74947b4.mp3",
+  "sfx_pop": "https://cdn.pixabay.com/download/audio/2022/08/30/audio_c3a74947b4.mp3",
+  "sfx_start": "https://cdn.pixabay.com/download/audio/2022/06/15/audio_2dea793cbf.mp3",
+  "sfx_timer": "https://cdn.pixabay.com/download/audio/2022/10/05/audio_a1eb8ec4a7.mp3"
 };
 
 // --- Firebase Init ---
