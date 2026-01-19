@@ -123,6 +123,7 @@ export default function CatchMindFix() {
           setTimeLeft(diff > 0 ? diff : 0);
         }
         
+        // 이모지 & 효과 트리거 감지
         if (data.lastEffect && data.lastEffect.timestamp > Date.now() - 2000) {
            if (data.lastEffect.type === 'reaction') {
              triggerReaction(data.lastEffect.emoji); 
@@ -171,9 +172,11 @@ export default function CatchMindFix() {
       const timer = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(timer);
     }
+    // 타임오버 처리 (방장만)
     if (isHost && roomData?.status === 'playing' && timeLeft === 0 && !roomData.isRoundOver) {
       handleRoundEnd("⏰ 타임 오버!", false); 
     }
+    // 정답 후 자동 넘기기
     if (isHost && roomData?.status === 'round_end') {
       const timer = setTimeout(() => {
         handleNextTurn("다음 라운드");
@@ -345,10 +348,12 @@ export default function CatchMindFix() {
       currentDrawer: nextDrawer,
       wordChoices: candidates, 
       messages: [{type:'system', text:'게임 시작!'}],
-      isRoundOver: false
+      isRoundOver: false,
+      scores: players.reduce((acc, p) => ({...acc, [p.id]: 0}), {})
     });
   };
 
+  // 단어 선택 (4개 중 1개)
   const selectWord = async (word) => {
     vibrate();
     await updateDoc(doc(db,'rooms',roomCode), {
@@ -378,6 +383,9 @@ export default function CatchMindFix() {
 
   // ★ [핵심 수정] 점수 처리: increment 사용으로 데이터 무결성 보장
   const handleRoundEnd = async (reasonText, isCorrect, winnerId = null) => {
+    // 이미 라운드가 끝났으면 실행하지 않음 (이중 실행 방지)
+    if (roomData.isRoundOver) return;
+
     await updateDoc(doc(db, 'rooms', roomCode), {
       status: 'round_end',
       isRoundOver: true, // 즉시 락 걸기
@@ -531,7 +539,7 @@ export default function CatchMindFix() {
         </div>
       )}
 
-      {/* 2.5 Word Selection */}
+      {/* 2.5 Word Selection (4 Options) */}
       {isJoined && roomData?.status === 'selecting' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="bg-white p-6 rounded-[2rem] shadow-2xl w-full max-w-sm text-center animate-in zoom-in">
@@ -656,6 +664,7 @@ export default function CatchMindFix() {
           <div className="text-center mb-8">
             <Trophy size={60} className="mx-auto text-yellow-400 mb-4 drop-shadow-lg"/>
             <h2 className="text-4xl font-black text-slate-800">최종 순위</h2>
+            <p className="text-slate-400 font-bold uppercase tracking-widest mt-2">Hall of Fame</p>
           </div>
           <div className="space-y-3">
              {players.sort((a,b) => b.score - a.score).map((p, i) => (
@@ -673,4 +682,4 @@ export default function CatchMindFix() {
       )}
     </div>
   );
-        }
+            }
