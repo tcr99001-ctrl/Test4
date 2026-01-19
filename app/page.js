@@ -51,7 +51,8 @@ const WORDS = [
   "모자", "장갑", "양말", "케이크", "토끼", "고양이", "강아지", "거북이", "나무", "자동차",
   "경찰서", "병원", "학교", "은행", "마트", "수영장", "놀이터", "도서관", "미술관", "영화관",
   "아이언맨", "스파이더맨", "엘사", "손흥민", "피카츄", "자유의여신상", "에펠탑", "피라미드", "제주도", "한라산",
-  "라면", "떡볶이", "김밥", "삼겹살", "초밥", "탕후루", "마라탕", "붕어빵", "호떡", "군고구마"
+  "라면", "떡볶이", "김밥", "삼겹살", "초밥", "탕후루", "마라탕", "붕어빵", "호떡", "군고구마",
+  "캥거루", "돌고래", "사자", "판다", "앵무새", "부엉이", "드라큘라", "좀비", "미라", "유령"
 ];
 
 const PALETTE = [
@@ -65,7 +66,7 @@ const TOTAL_ROUNDS = 3;
 // 진동 헬퍼
 const vibrate = () => { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30); };
 
-export default function CatchMindFix() {
+export default function CatchMindLogicFix() {
   const [user, setUser] = useState(null);
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
@@ -93,7 +94,6 @@ export default function CatchMindFix() {
   const isJoined = user && players.some(p => p.id === user.uid);
   const isHost = roomData?.hostId === user?.uid;
   const isDrawer = roomData?.currentDrawer === user?.uid;
-  const myData = players.find(p => p.id === user?.uid);
 
   // --- Auth & Setup ---
   useEffect(() => {
@@ -123,7 +123,6 @@ export default function CatchMindFix() {
           setTimeLeft(diff > 0 ? diff : 0);
         }
         
-        // 이모지 & 효과 트리거 감지
         if (data.lastEffect && data.lastEffect.timestamp > Date.now() - 2000) {
            if (data.lastEffect.type === 'reaction') {
              triggerReaction(data.lastEffect.emoji); 
@@ -172,11 +171,9 @@ export default function CatchMindFix() {
       const timer = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
       return () => clearInterval(timer);
     }
-    // 타임오버 처리 (방장만)
     if (isHost && roomData?.status === 'playing' && timeLeft === 0 && !roomData.isRoundOver) {
       handleRoundEnd("⏰ 타임 오버!", false); 
     }
-    // 정답 후 자동 넘기기
     if (isHost && roomData?.status === 'round_end') {
       const timer = setTimeout(() => {
         handleNextTurn("다음 라운드");
@@ -310,6 +307,7 @@ export default function CatchMindFix() {
       hostId: user.uid, status: 'lobby', 
       keyword: '', currentDrawer: '', messages: [], strokes: [],
       currentTurnIndex: 0, isRoundOver: false, currentRound: 1,
+      usedWords: [], // ★ 사용된 단어 목록 초기화
       createdAt: Date.now()
     });
     await setDoc(doc(db,'rooms',code,'players',user.uid), { name: playerName, score: 0, joinedAt: Date.now() });
@@ -335,31 +333,50 @@ export default function CatchMindFix() {
     const shuffled = players.map(p => p.id).sort(() => Math.random() - 0.5);
     const nextDrawer = shuffled[0];
 
-    // 4개 후보 생성
-    const candidates = [];
-    while(candidates.length < 4) {
-      const w = WORDS[Math.floor(Math.random() * WORDS.length)];
-      if(!candidates.includes(w)) candidates.push(w);
-    }
+    // ★ [로직] 중복 없는 후보 생성
+    const used = []; // 게임 시작이므로 빈 배열
+    const candidates = getNewCandidates(used);
 
     await updateDoc(doc(db,'rooms',roomCode), {
       status: 'selecting',
       turnOrder: shuffled, currentTurnIndex: 0, currentRound: 1,
       currentDrawer: nextDrawer,
       wordChoices: candidates, 
+      usedWords: used,
       messages: [{type:'system', text:'게임 시작!'}],
       isRoundOver: false,
       scores: players.reduce((acc, p) => ({...acc, [p.id]: 0}), {})
     });
   };
 
-  // 단어 선택 (4개 중 1개)
+  // ★ [핵심] 단어 중복 방지 로직 함수
+  const getNewCandidates = (usedList = []) => {
+    // 1. 안 쓴 단어 필터링
+    let available = WORDS.filter(w => !usedList.includes(w));
+    
+    // 2. 만약 단어가 고갈되면 리셋 (무한 루프 방지)
+    if (available.length < 4) {
+      available = [...WORDS]; 
+      // usedList는 리셋하지만, DB 업데이트는 별도로 해야 함 (여기선 간단히 로컬 리턴)
+    }
+
+    // 3. 랜덤 4개 추출
+    const picks = [];
+    while(picks.length < 4) {
+      const w = available[Math.floor(Math.random() * available.length)];
+      if(!picks.includes(w)) picks.push(w);
+    }
+    return picks;
+  };
+
   const selectWord = async (word) => {
     vibrate();
+    // 선택된 단어를 usedWords에 추가
     await updateDoc(doc(db,'rooms',roomCode), {
       status: 'playing',
       keyword: word,
       strokes: [],
+      usedWords: arrayUnion(word), // ★ 여기서 저장
       turnEndTime: Date.now() + (TURN_DURATION * 1000),
       isRoundOver: false
     });
@@ -383,12 +400,11 @@ export default function CatchMindFix() {
 
   // ★ [핵심 수정] 점수 처리: increment 사용으로 데이터 무결성 보장
   const handleRoundEnd = async (reasonText, isCorrect, winnerId = null) => {
-    // 이미 라운드가 끝났으면 실행하지 않음 (이중 실행 방지)
     if (roomData.isRoundOver) return;
 
     await updateDoc(doc(db, 'rooms', roomCode), {
       status: 'round_end',
-      isRoundOver: true, // 즉시 락 걸기
+      isRoundOver: true,
       roundWinner: isCorrect ? players.find(p=>p.id===winnerId)?.name : null,
       roundReason: reasonText,
       lastEffect: isCorrect ? { type: 'correct', text: `🎉 정답! (${roomData.keyword})`, timestamp: Date.now() } : null,
@@ -396,7 +412,6 @@ export default function CatchMindFix() {
     });
 
     if (isCorrect && winnerId) {
-      // 정답자 +2점, 화가 +1점 (원자적 연산)
       await updateDoc(doc(db,'rooms',roomCode,'players',winnerId), { score: increment(2) });
       await updateDoc(doc(db,'rooms',roomCode,'players',roomData.currentDrawer), { score: increment(1) });
     }
@@ -420,11 +435,9 @@ export default function CatchMindFix() {
 
     const nextDrawer = roomData.turnOrder[nextIndex];
     
-    const candidates = [];
-    while(candidates.length < 4) {
-      const w = WORDS[Math.floor(Math.random() * WORDS.length)];
-      if(!candidates.includes(w)) candidates.push(w);
-    }
+    // ★ [로직] 다음 후보 생성 (DB의 usedWords 기반)
+    // 주의: roomData.usedWords가 최신 상태여야 함
+    const candidates = getNewCandidates(roomData.usedWords || []);
 
     await updateDoc(doc(db, 'rooms', roomCode), {
       status: 'selecting',
@@ -475,7 +488,7 @@ export default function CatchMindFix() {
         ))}
       </div>
 
-      {/* Confetti (z-index 수정) */}
+      {/* Confetti */}
       {showConfetti && (
         <div className="fixed inset-0 z-40 pointer-events-none flex justify-center items-center">
           <div className="text-6xl animate-bounce">🎉🎊✨</div>
@@ -682,4 +695,4 @@ export default function CatchMindFix() {
       )}
     </div>
   );
-            }
+        }
